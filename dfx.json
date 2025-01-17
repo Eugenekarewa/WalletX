@@ -1,0 +1,37 @@
+{
+  "canisters": {
+    "WalletX_backend": {
+      "main": "src/WalletX_backend/main.mo",
+      "type": "motoko"
+    },
+    "WalletX_frontend": {
+      "dependencies": [
+        "WalletX_backend"
+      ],
+      "source": [
+        "src/WalletX_frontend/dist"
+      ],
+      "type": "assets",
+      "workspace": "WalletX_frontend"
+    },
+    "internet_identity": {
+      "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
+      "frontend": {},
+      "remote": {
+        "id": {
+          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+        }
+      },
+      "type": "custom",
+      "wasm": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity_dev.wasm.gz"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}
