@@ -11,6 +11,11 @@ import Int "mo:base/Int";
 import Array "mo:base/Array";
 import ExperimentalCycles "mo:base/ExperimentalCycles";
 import Error "mo:base/Error";
+import Iter "mo:base/Iter";
+import Trie "mo:base/Trie";
+import Nat8 "mo:base/Nat8";
+import Blob "mo:base/Blob";
+
 actor WalletX {
     type TransferArgs = {
         from_subaccount: ?Blob;
@@ -29,42 +34,44 @@ actor WalletX {
         subaccount: ?Blob;
     };
 
-    // State variables for balances and transactions
     private stable var balanceEntries: [(Text, Nat)] = [];
     private var balances = HashMap.fromIter<Text, Nat>(balanceEntries.vals(), 100, Text.equal, Text.hash);
+    private var tokenBalances : Trie.Trie<TokenId, TokenBalance> = Trie.empty();
 
     private stable var transactionEntries: [(Text, [(Text, Nat)])] = [];
     private var transactions = HashMap.fromIter<Text, [(Text, Nat)]>(transactionEntries.vals(), 100, Text.equal, Text.hash);
 
-    // Exchange rate: 1 KES = 1 Token (modifiable)
     private stable var exchangeRate: Nat = 1;
 
-    // Logging function with verbosity levels
     private func log(level: Text, message: Text) {
         Debug.print("[" # level # "] " # message);
     };
 
-    // Function to check the current cycle balance of the canister
+    type TokenId= Text;
+    type TokenBalance = Nat;
+
+    public query func dump() : async [(TokenId, TokenBalance)] {
+        Iter.toArray(Trie.iter(tokenBalances))
+    };
+
     public query func wallet_balance(): async Nat {
-    let cycleBalance = Cycles.balance();
-    Debug.print("Current canister cycle balance: " # Nat.toText(cycleBalance));
-    return cycleBalance;
-};
+        let cycleBalance = Cycles.balance();
+        Debug.print("Current canister cycle balance: " # Nat.toText(cycleBalance));
+        return cycleBalance;
+    };
 
-    // Function to accept cycles sent to the wallet
     public func wallet_receive(): async Bool {
-    let available = Cycles.available();
-    if (available > 0) {
-        let accepted = Cycles.accept(available);
-        Debug.print("Accepted cycles: " # Nat.toText(accepted));
-        return true;
-    } else {
-        Debug.print("No cycles received.");
-        return false;
-    }
-};
+        let available = Cycles.available();
+        if (available > 0) {
+            let accepted = Cycles.accept(available);
+            Debug.print("Accepted cycles: " # Nat.toText(accepted));
+            return true;
+        } else {
+            Debug.print("No cycles received.");
+            return false;
+        }
+    };
 
-    // Function to update the exchange rate
     public func updateExchangeRate(newRate: Nat): async Bool {
         if (newRate > 0) {
             exchangeRate := newRate;
@@ -76,22 +83,17 @@ actor WalletX {
         }
     };
 
-    // Function to check an account's token balance
     public query func check_balance(account: Text): async Nat {
-    Option.get(balances.get(account), 0)
+        Option.get(balances.get(account), 0)
     };
 
-    // Function to fetch transaction history for an account
     public query func getTransactionHistory(account: Text): async ?[(Text, Nat)] {
-    transactions.get(account)
+        transactions.get(account)
     };
 
-    // Function to deposit Kenyan Shillings (KES) into the wallet
-    public func depositKES(account: Text, amountKES: Nat): async Bool {
-        // Convert KES to Tokens based on the exchange rate
+    public func depositKES(user : Principal, _account: Text, amountKES: Nat): async Bool {
+        let account = Principal.toText(user);
         let tokenAmount = amountKES * exchangeRate;
-
-        // Check for overflow
         let currentBalance = Option.get(balances.get(account), 0);
         if (currentBalance + tokenAmount < currentBalance) {
             log("ERROR", "Overflow detected while depositing tokens.");
@@ -100,8 +102,6 @@ actor WalletX {
 
         let newBalance = currentBalance + tokenAmount;
         balances.put(account, newBalance);
-
-        // Record the deposit transaction
         let transaction = (Int.toText(Time.now()), tokenAmount);
         let accountTransactions = Option.get(transactions.get(account), []);
         transactions.put(account, Array.append(accountTransactions, [transaction]));
@@ -110,7 +110,23 @@ actor WalletX {
         return true;
     };
 
-    // Function to transfer tokens to another account
+    public func getDepositAddress(principal: Principal): async Text {
+        let principalBlob = Principal.toBlob(principal);
+        let principalBytes = Blob.toArray(principalBlob);
+        let paddedBytes = Array.tabulate<Nat8>(32, func (i) {
+            if (i < principalBytes.size()) { principalBytes[i] } else { 0 }
+        });
+        bytesToHex(paddedBytes)
+    };
+    private func bytesToHex(bytes: [Nat8]): Text {
+        let hexChars = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"];
+        var result = "0x";
+        for (byte in bytes.vals()) {
+            result #= hexChars[Nat8.toNat(byte / 16)] # hexChars[Nat8.toNat(byte % 16)];
+        };
+        result
+    };
+
     public func transfer_tokens(from: Text, to: Text, amount: Nat): async Bool {
         let fromBalance = Option.get(balances.get(from), 0);
         if (fromBalance < amount) {
@@ -118,14 +134,9 @@ actor WalletX {
             return false;
         };
 
-        // Deduct from sender's balance
         balances.put(from, fromBalance - amount);
-
-        // Add to receiver's balance
         let toBalance = Option.get(balances.get(to), 0);
         balances.put(to, toBalance + amount);
-
-        // Record the transaction
         let transaction = (Int.toText(Time.now()), amount);
         let senderTransactions = Option.get(transactions.get(from), []);
         transactions.put(from, Array.append(senderTransactions, [transaction]));
@@ -136,7 +147,6 @@ actor WalletX {
         return true;
     };
 
-    // Function to transfer cycles to another canister
     public func transfer_cycles(toCanister: Principal, amount: Nat): async Result.Result<(), Text> {
         let cycleBalance = ExperimentalCycles.balance();
         if (amount > cycleBalance) {
@@ -151,8 +161,8 @@ actor WalletX {
             log("INFO", "Successfully transferred " # Nat.toText(amount) # " cycles to canister: " # Principal.toText(toCanister));
             #ok()
         } catch (error : Error) {
-    Debug.print("Failed to transfer cycles: " # Error.message(error));
-    #err("Reject message: " # Error.message(error))
-    }
+            Debug.print("Failed to transfer cycles: " # Error.message(error));
+            #err("Reject message: " # Error.message(error))
+        }
     };
 };

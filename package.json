@@ -16,6 +16,7 @@
     "src/WalletX_frontend"
   ],
   "dependencies": {
-    "@dfinity/auth-client": "^2.2.0"
+    "@dfinity/auth-client": "^2.2.0",
+    "qrcode.react": "^4.2.0"
   }
 }

@@ -29,8 +29,12 @@
   "defaults": {
     "build": {
       "args": "",
-      "packtool": ""
+      "packtool": "mops sources"
     }
+  },
+  "evm_rpc": {
+    "type": "pull",
+    "id": "7hfb6-caaaa-aaaar-qadga-cai"
   },
   "output_env_file": ".env",
   "version": 1
